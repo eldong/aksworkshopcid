@@ -1,11 +1,14 @@
 # CI builds the website image and publishes an immutable tag to the existing ACR.
 name: Build and Push
 
-# Run CI whenever code is pushed to the repository's main branch.
+# Run CI manually from the GitHub Actions page.
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+
+  # Push-based builds are temporarily disabled.
+  # push:
+  #   branches:
+  #     - main
 
 # Prevent overlapping builds for the same branch while preserving unrelated runs.
 concurrency:

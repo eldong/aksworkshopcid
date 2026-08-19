@@ -1,8 +1,15 @@
 # CD deploys the exact image produced by a successful Build and Push workflow run.
 name: Deploy to AKS
 
-# Start only after the named CI workflow completes.
+# Run manually with an image tag, or automatically after the named CI workflow completes.
 on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: ACR image tag to deploy, such as the Build and Push run number
+        required: true
+        type: string
+
   workflow_run:
     workflows:
       - Build and Push
@@ -22,28 +29,44 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  # Keep the image repository name consistent with the build workflow.
+  IMAGE_NAME: aks-static-website
+
 jobs:
   deploy:
     name: Deploy image to AKS
-    # Do not deploy when CI failed or was cancelled.
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # Manual runs are allowed; automatic runs require a successful CI conclusion.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
-      # CD runs in a separate workflow, so it checks out the exact commit built by CI.
-      - name: Check out built commit
+      # Automatic CD checks out the built commit; manual CD uses the selected branch.
+      - name: Check out repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
-      # Download the image reference artifact from the triggering CI workflow run.
+      # Automatic CD downloads the exact image reference from the triggering CI run.
       - name: Download image reference
+        if: ${{ github.event_name == 'workflow_run' }}
         uses: actions/download-artifact@v4
         with:
           name: image-reference
           path: deployment-artifact
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Manual CD constructs the same immutable image reference from the supplied tag.
+      - name: Record manually selected image
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        env:
+          REGISTRY: ${{ secrets.ACR_NAME }}.azurecr.io
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          mkdir -p deployment-artifact
+          printf '%s/%s:%s\n' "$REGISTRY" "$IMAGE_NAME" "$IMAGE_TAG" > deployment-artifact/image-reference.txt
 
       # Exchange GitHub's short-lived OIDC token for an Azure access token.
       - name: Sign in to Azure with OIDC

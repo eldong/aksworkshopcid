@@ -1,6 +1,6 @@
 # AKS Static Website CI/CD Demo
 
-This project demonstrates how a push to GitHub can build a containerized static website, publish
+This project demonstrates how GitHub Actions can build a containerized static website, publish
 the image to an existing Azure Container Registry (ACR), and deploy it to an existing Azure
 Kubernetes Service (AKS) cluster.
 
@@ -32,7 +32,7 @@ does not require application backend code.
 ## Architecture overview
 
 ```text
-Push to main
+Manual Build and Push run
     |
     v
 GitHub Actions: Build and Push
@@ -126,7 +126,8 @@ means this permission should already exist.
 
 ## CI workflow: build and push
 
-`.github/workflows/build-and-push.yml` runs on every push to `main`:
+`.github/workflows/build-and-push.yml` runs manually through `workflow_dispatch`. The push trigger
+is included as commented YAML so it can be enabled later:
 
 1. Checks out the repository.
 2. Authenticates to Azure through OIDC.
@@ -152,8 +153,10 @@ instead of `latest`, making it clear which build is running and preventing tag a
 
 ## CD workflow: deploy
 
-`.github/workflows/deploy.yml` starts when **Build and Push** completes on `main`. Its job-level
-condition prevents deployment unless CI concluded successfully.
+`.github/workflows/deploy.yml` starts when **Build and Push** completes on `main`, or manually
+through `workflow_dispatch`. Its job-level condition prevents automatic deployment unless CI
+concluded successfully. A manual run requires the ACR image tag to deploy, typically the run number
+from a completed **Build and Push** workflow.
 
 The workflow:
 
@@ -185,9 +188,10 @@ Open <http://localhost:8080>.
 1. Create the required GitHub secrets.
 2. Configure the GitHub OIDC federated identity and Azure role assignments.
 3. Confirm the AKS cluster is attached to ACR.
-4. Push this project to the repository's `main` branch.
-5. Open the repository's **Actions** tab and follow the **Build and Push** run.
-6. After CI succeeds, follow the automatically started **Deploy to AKS** run.
+4. Open the repository's **Actions** tab, select **Build and Push**, and choose **Run workflow**.
+5. Follow the build run until it completes successfully.
+6. Follow the automatically started **Deploy to AKS** run, or run it manually and enter the CI run
+   number as `image_tag`.
 
 ## Test after deployment
 
