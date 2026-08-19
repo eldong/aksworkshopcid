@@ -1,0 +1,19 @@
+# The Service gives the website a stable public endpoint in front of its pods.
+apiVersion: v1
+kind: Service
+metadata:
+  name: aks-static-website
+  labels:
+    app: aks-static-website
+spec:
+  # Azure provisions or reuses load-balancer infrastructure for this public service.
+  type: LoadBalancer
+  selector:
+    # Traffic is sent to pods carrying this label.
+    app: aks-static-website
+  ports:
+    # Expose public HTTP port 80 and forward it to Nginx port 80.
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

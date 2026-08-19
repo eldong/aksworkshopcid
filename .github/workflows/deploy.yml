@@ -1,0 +1,82 @@
+# CD deploys the exact image produced by a successful Build and Push workflow run.
+name: Deploy to AKS
+
+# Start only after the named CI workflow completes.
+on:
+  workflow_run:
+    workflows:
+      - Build and Push
+    types:
+      - completed
+    branches:
+      - main
+
+# Avoid simultaneous rollouts to the shared AKS workload.
+concurrency:
+  group: deploy-aks-static-website
+  cancel-in-progress: false
+
+# OIDC requires id-token: write; cross-run artifact download requires actions: read.
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Deploy image to AKS
+    # Do not deploy when CI failed or was cancelled.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      # CD runs in a separate workflow, so it checks out the exact commit built by CI.
+      - name: Check out built commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      # Download the image reference artifact from the triggering CI workflow run.
+      - name: Download image reference
+        uses: actions/download-artifact@v4
+        with:
+          name: image-reference
+          path: deployment-artifact
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Exchange GitHub's short-lived OIDC token for an Azure access token.
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Merge credentials for the existing cluster into the runner's kubeconfig.
+      - name: Retrieve AKS credentials
+        run: >-
+          az aks get-credentials
+          --resource-group "${{ secrets.AKS_RESOURCE_GROUP }}"
+          --name "${{ secrets.AKS_CLUSTER_NAME }}"
+          --overwrite-existing
+
+      # Create or update the Deployment and public LoadBalancer Service.
+      - name: Apply Kubernetes manifests
+        run: kubectl apply --filename k8s/
+
+      # Replace the manifest placeholder with the immutable image produced by CI.
+      - name: Update deployment image
+        shell: bash
+        run: |
+          IMAGE="$(cat deployment-artifact/image-reference.txt)"
+          test -n "$IMAGE"
+          kubectl set image deployment/aks-static-website website="$IMAGE"
+
+      # Fail the workflow if Kubernetes cannot complete the rollout in five minutes.
+      - name: Wait for rollout
+        run: kubectl rollout status deployment/aks-static-website --timeout=5m
+
+      # Print the service so its assigned public IP is visible in the workflow log.
+      - name: Show public service
+        run: kubectl get service aks-static-website

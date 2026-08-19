@@ -1,0 +1,61 @@
+# The Deployment maintains two identical website pods and performs rolling updates.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # The CD workflow uses this name when updating the container image.
+  name: aks-static-website
+  labels:
+    app: aks-static-website
+spec:
+  # Two replicas provide basic availability during updates or pod failures.
+  replicas: 2
+  selector:
+    # This selector must match the labels on the pod template below.
+    matchLabels:
+      app: aks-static-website
+  strategy:
+    # RollingUpdate keeps the website available while a new image is deployed.
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        # The Service uses this label to route traffic to the pods.
+        app: aks-static-website
+    spec:
+      containers:
+        # The container name is referenced by kubectl set image in the CD workflow.
+        - name: website
+          # The CD workflow replaces this placeholder with the exact CI image tag.
+          image: YOUR_ACR_NAME.azurecr.io/aks-static-website:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            # Nginx listens for HTTP traffic on port 80.
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          resources:
+            # Requests help Kubernetes schedule the pod; limits prevent excessive use.
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          livenessProbe:
+            # Restart the container if Nginx stops serving the home page.
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            # Send traffic only after the website is ready to respond.
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
