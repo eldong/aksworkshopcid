@@ -1,0 +1,101 @@
+# Deploy the optional AGIC Ingress without changing the existing application release workflow.
+name: Deploy AGIC Ingress
+
+# Run only when a workshop operator explicitly chooses to enable the ingress route.
+on:
+  workflow_dispatch:
+
+# Avoid simultaneous attempts to reconcile the same Ingress resource.
+concurrency:
+  group: deploy-agic-ingress
+  cancel-in-progress: false
+
+# OIDC login needs id-token: write; checkout needs contents: read.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy-ingress:
+    name: Deploy Application Gateway ingress
+    runs-on: ubuntu-latest
+
+    steps:
+      # Download the optional Ingress manifest.
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Exchange GitHub's short-lived OIDC token for an Azure access token.
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Retrieve credentials for the existing AKS cluster.
+      - name: Retrieve AKS credentials
+        run: >-
+          az aks get-credentials
+          --resource-group "${{ secrets.AKS_RESOURCE_GROUP }}"
+          --name "${{ secrets.AKS_CLUSTER_NAME }}"
+          --overwrite-existing
+
+      # Fail early if the managed AGIC controller is not ready.
+      - name: Verify AGIC controller
+        run: >-
+          kubectl rollout status
+          deployment/ingress-appgw-deployment
+          --namespace kube-system
+          --timeout=5m
+
+      # Apply only the optional AGIC resources; the existing k8s workflow remains unchanged.
+      - name: Apply AGIC Ingress
+        run: kubectl apply --filename k8s/agic/
+
+      # Wait for AGIC to reconcile Application Gateway and publish its frontend address.
+      - name: Wait for ingress address
+        id: ingress
+        shell: bash
+        run: |
+          for attempt in {1..40}; do
+            ADDRESS="$(kubectl get ingress aks-static-website \
+              --output jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
+            if [ -z "$ADDRESS" ]; then
+              ADDRESS="$(kubectl get ingress aks-static-website \
+                --output jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)"
+            fi
+
+            if [ -n "$ADDRESS" ]; then
+              echo "address=$ADDRESS" >> "$GITHUB_OUTPUT"
+              echo "Application Gateway address: $ADDRESS"
+              exit 0
+            fi
+
+            echo "Waiting for Application Gateway address ($attempt/40)..."
+            sleep 15
+          done
+
+          kubectl describe ingress aks-static-website
+          echo "::error::AGIC did not publish an ingress address within 10 minutes."
+          exit 1
+
+      # Confirm that the website responds through Application Gateway.
+      - name: Test Application Gateway endpoint
+        env:
+          ADDRESS: ${{ steps.ingress.outputs.address }}
+        run: >-
+          curl
+          --fail
+          --show-error
+          --location
+          --retry 12
+          --retry-all-errors
+          --retry-delay 10
+          "http://${ADDRESS}/"
+
+      # Display both endpoints to make the side-by-side workshop paths clear.
+      - name: Show ingress and existing service
+        run: |
+          kubectl get ingress aks-static-website --output wide
+          kubectl get service aks-static-website --output wide
