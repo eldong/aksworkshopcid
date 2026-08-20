@@ -120,7 +120,6 @@ kind: Ingress
 metadata:
   name: aks-static-website
   annotations:
-    kubernetes.io/ingress.class: azure/application-gateway
     appgw.ingress.kubernetes.io/health-probe-path: /
     appgw.ingress.kubernetes.io/health-probe-status-codes: "200-399"
 spec:
@@ -283,7 +282,7 @@ These are intentionally excluded from the first ingress deployment.
 - Confirm `ingress-appgw-deployment` is ready.
 - Inspect `kubectl describe ingress aks-static-website`.
 - Inspect AGIC controller logs.
-- Confirm the Ingress class and legacy annotation both use `azure-application-gateway`.
+- Confirm `spec.ingressClassName` uses the installed `azure-application-gateway` class.
 
 ### Backend health is unhealthy
 
@@ -302,11 +301,9 @@ spec:
   ingressClassName: azure-application-gateway
 ```
 
-and:
-
-```yaml
-kubernetes.io/ingress.class: azure/application-gateway
-```
+Do not also set the legacy `kubernetes.io/ingress.class` annotation. This cluster validates that
+the annotation value must exactly match `ingressClassName`, while AGIC's historical annotation
+value uses a different controller-style name.
 
 ### AGIC overwrites portal changes
 

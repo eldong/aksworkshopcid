@@ -4,8 +4,6 @@ kind: Ingress
 metadata:
   name: aks-static-website
   annotations:
-    # The legacy annotation is retained because AGIC uses it to select Ingress resources.
-    kubernetes.io/ingress.class: azure/application-gateway
     # Probe the Nginx home page and accept normal redirect/success responses.
     appgw.ingress.kubernetes.io/health-probe-path: /
     appgw.ingress.kubernetes.io/health-probe-status-codes: "200-399"
