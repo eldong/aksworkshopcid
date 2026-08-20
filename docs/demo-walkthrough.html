@@ -1,0 +1,1196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AKS CI/CD and Application Gateway Demo Walkthrough</title>
+  <script>
+    (() => {
+      const param = new URLSearchParams(window.location.search).get("scoutTheme");
+      const theme =
+        param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", theme);
+    })();
+  </script>
+  <style>
+    :root {
+      color-scheme: light;
+      --cp-bg: #f7f4ef;
+      --cp-bg-elevated: #fcfbf8;
+      --cp-surface: #ffffff;
+      --cp-surface-soft: #f5f5f5;
+      --cp-border: #dedede;
+      --cp-border-strong: #919191;
+      --cp-text: #242424;
+      --cp-text-muted: #5c5c5c;
+      --cp-text-soft: #6f6f6f;
+      --cp-accent: #b11f4b;
+      --cp-accent-hover: #9a1a41;
+      --cp-accent-soft: rgba(177, 31, 75, 0.08);
+      --cp-accent-fg: #ffffff;
+      --cp-success: #16a34a;
+      --cp-danger: #dc2626;
+      --cp-warning: #f59e0b;
+      --cp-link: #0078d4;
+      --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
+      --cp-overlay: rgba(255, 255, 255, 0.8);
+      --cp-panel: rgba(255, 255, 255, 0.86);
+      --cp-panel-strong: rgba(255, 255, 255, 0.96);
+      --cp-sheen: rgba(255, 255, 255, 0.55);
+      --cp-highlight: rgba(177, 31, 75, 0.12);
+    }
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --cp-bg: #3d3b3a;
+      --cp-bg-elevated: #343231;
+      --cp-surface: #292929;
+      --cp-surface-soft: #2e2e2e;
+      --cp-border: #474747;
+      --cp-border-strong: #5f5f5f;
+      --cp-text: #dedede;
+      --cp-text-muted: #919191;
+      --cp-text-soft: #b0b0b0;
+      --cp-accent: #fd8ea1;
+      --cp-accent-hover: #fb7b91;
+      --cp-accent-soft: rgba(253, 142, 161, 0.14);
+      --cp-accent-fg: #1a1a1a;
+      --cp-success: #4ade80;
+      --cp-danger: #f87171;
+      --cp-warning: #fbbf24;
+      --cp-link: #4da6ff;
+      --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+      --cp-overlay: rgba(41, 41, 41, 0.88);
+      --cp-panel: rgba(41, 41, 41, 0.72);
+      --cp-panel-strong: rgba(41, 41, 41, 0.96);
+      --cp-sheen: rgba(255, 255, 255, 0.04);
+      --cp-highlight: rgba(253, 142, 161, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      background: var(--cp-bg);
+      color: var(--cp-text);
+      font-family: "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif;
+      line-height: 1.55;
+      margin: 0;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    a {
+      color: var(--cp-link);
+    }
+
+    .shell {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      background: var(--cp-bg-elevated);
+      border-right: 1px solid var(--cp-border);
+      height: 100vh;
+      overflow-y: auto;
+      padding: 24px 20px;
+      position: sticky;
+      top: 0;
+    }
+
+    .brand {
+      align-items: center;
+      display: flex;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+
+    .brand-mark {
+      align-items: center;
+      background: var(--cp-accent);
+      border-radius: 0.625rem;
+      color: var(--cp-accent-fg);
+      display: inline-flex;
+      font-size: 18px;
+      font-weight: 700;
+      height: 40px;
+      justify-content: center;
+      width: 40px;
+    }
+
+    .brand strong,
+    .brand span {
+      display: block;
+    }
+
+    .brand span {
+      color: var(--cp-text-muted);
+      font-size: 12px;
+    }
+
+    .progress-wrap {
+      margin-bottom: 20px;
+    }
+
+    .progress-label {
+      color: var(--cp-text-muted);
+      display: flex;
+      font-size: 12px;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .progress-track {
+      background: var(--cp-surface-soft);
+      border: 1px solid var(--cp-border);
+      border-radius: 0.625rem;
+      height: 8px;
+      overflow: hidden;
+    }
+
+    .progress-bar {
+      background: var(--cp-accent);
+      height: 100%;
+      transition: width 180ms ease;
+      width: 0;
+    }
+
+    .nav-list {
+      display: grid;
+      gap: 4px;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .nav-list a {
+      align-items: center;
+      border-left: 3px solid transparent;
+      border-radius: 0 0.625rem 0.625rem 0;
+      color: var(--cp-text-muted);
+      display: flex;
+      font-size: 14px;
+      gap: 10px;
+      padding: 9px 10px;
+      text-decoration: none;
+    }
+
+    .nav-list a:hover,
+    .nav-list a.active {
+      background: var(--cp-accent-soft);
+      border-left-color: var(--cp-accent);
+      color: var(--cp-text);
+    }
+
+    .nav-number {
+      align-items: center;
+      border: 1px solid var(--cp-border);
+      border-radius: 0.625rem;
+      display: inline-flex;
+      flex: 0 0 28px;
+      font-size: 12px;
+      height: 28px;
+      justify-content: center;
+    }
+
+    .sidebar-actions {
+      border-top: 1px solid var(--cp-border);
+      display: grid;
+      gap: 8px;
+      margin-top: 24px;
+      padding-top: 20px;
+    }
+
+    .content {
+      min-width: 0;
+    }
+
+    .hero {
+      background: var(--cp-surface);
+      border-bottom: 1px solid var(--cp-border);
+      padding: 52px clamp(24px, 6vw, 88px);
+    }
+
+    .eyebrow {
+      color: var(--cp-accent);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3 {
+      line-height: 1.15;
+      margin-top: 0;
+    }
+
+    h1 {
+      font-size: clamp(34px, 5vw, 58px);
+      letter-spacing: -0.04em;
+      margin-bottom: 16px;
+      max-width: 920px;
+    }
+
+    .hero-copy {
+      color: var(--cp-text-muted);
+      font-size: 19px;
+      max-width: 820px;
+    }
+
+    .hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 28px;
+    }
+
+    .pill {
+      background: var(--cp-surface-soft);
+      border: 1px solid var(--cp-border);
+      border-radius: 999px;
+      color: var(--cp-text-muted);
+      display: inline-flex;
+      font-size: 13px;
+      padding: 7px 12px;
+    }
+
+    .main {
+      margin: 0 auto;
+      max-width: 1120px;
+      padding: 36px clamp(20px, 5vw, 64px) 96px;
+    }
+
+    .stage {
+      margin-bottom: 56px;
+      scroll-margin-top: 24px;
+    }
+
+    .stage-header {
+      align-items: flex-start;
+      display: flex;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .stage-number {
+      align-items: center;
+      background: var(--cp-accent);
+      border-radius: 0.625rem;
+      color: var(--cp-accent-fg);
+      display: inline-flex;
+      flex: 0 0 42px;
+      font-weight: 700;
+      height: 42px;
+      justify-content: center;
+    }
+
+    .stage h2 {
+      font-size: clamp(25px, 3vw, 34px);
+      margin-bottom: 6px;
+    }
+
+    .stage-intro {
+      color: var(--cp-text-muted);
+      margin: 0;
+    }
+
+    .grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .grid.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .card {
+      background: var(--cp-surface);
+      border: 1px solid var(--cp-border);
+      border-radius: 16px;
+      box-shadow: var(--cp-shadow);
+      padding: 22px;
+    }
+
+    .card h3 {
+      font-size: 17px;
+      margin-bottom: 10px;
+    }
+
+    .card p:last-child {
+      margin-bottom: 0;
+    }
+
+    .muted {
+      color: var(--cp-text-muted);
+    }
+
+    .callout {
+      background: var(--cp-accent-soft);
+      border: 1px solid var(--cp-accent);
+      border-radius: 0.625rem;
+      margin: 18px 0;
+      padding: 16px 18px;
+    }
+
+    .callout.warning {
+      background: var(--cp-surface-soft);
+      border-color: var(--cp-warning);
+    }
+
+    .callout.success {
+      background: var(--cp-surface-soft);
+      border-color: var(--cp-success);
+    }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .architecture {
+      align-items: center;
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr auto 1fr auto 1fr;
+      margin: 20px 0;
+    }
+
+    .node {
+      background: var(--cp-surface-soft);
+      border: 1px solid var(--cp-border);
+      border-radius: 0.625rem;
+      min-height: 96px;
+      padding: 16px;
+      text-align: center;
+    }
+
+    .node strong,
+    .node span {
+      display: block;
+    }
+
+    .node span {
+      color: var(--cp-text-muted);
+      font-size: 13px;
+      margin-top: 4px;
+    }
+
+    .arrow {
+      color: var(--cp-accent);
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .code-wrap {
+      background: var(--cp-bg-elevated);
+      border: 1px solid var(--cp-border);
+      border-radius: 0.625rem;
+      margin: 14px 0;
+      overflow: hidden;
+    }
+
+    .code-head {
+      align-items: center;
+      border-bottom: 1px solid var(--cp-border);
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 10px 8px 14px;
+    }
+
+    .code-head span {
+      color: var(--cp-text-muted);
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    pre {
+      margin: 0;
+      overflow-x: auto;
+      padding: 16px;
+    }
+
+    code {
+      font-family: Consolas, "Courier New", Courier, monospace;
+      font-size: 13px;
+    }
+
+    .btn {
+      background: var(--cp-accent);
+      border: 1px solid var(--cp-accent);
+      border-radius: 0.625rem;
+      color: var(--cp-accent-fg);
+      cursor: pointer;
+      font-weight: 600;
+      padding: 9px 14px;
+    }
+
+    .btn:hover {
+      background: var(--cp-accent-hover);
+      border-color: var(--cp-accent-hover);
+    }
+
+    .btn.secondary {
+      background: var(--cp-surface);
+      border-color: var(--cp-border-strong);
+      color: var(--cp-text);
+    }
+
+    .btn.small {
+      font-size: 12px;
+      padding: 5px 9px;
+    }
+
+    .checklist {
+      display: grid;
+      gap: 10px;
+      list-style: none;
+      margin: 12px 0 0;
+      padding: 0;
+    }
+
+    .checklist label {
+      align-items: flex-start;
+      cursor: pointer;
+      display: flex;
+      gap: 10px;
+    }
+
+    .checklist input {
+      accent-color: var(--cp-accent);
+      margin-top: 5px;
+    }
+
+    .speaker {
+      background: var(--cp-surface-soft);
+      border-left: 4px solid var(--cp-accent);
+      border-radius: 0 0.625rem 0.625rem 0;
+      margin-top: 16px;
+      padding: 16px 18px;
+    }
+
+    .speaker strong {
+      color: var(--cp-accent);
+      display: block;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+
+    .speaker p {
+      margin: 0;
+    }
+
+    .comparison {
+      border-collapse: collapse;
+      margin-top: 16px;
+      width: 100%;
+    }
+
+    .comparison th,
+    .comparison td {
+      border-bottom: 1px solid var(--cp-border);
+      padding: 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .comparison th {
+      background: var(--cp-surface-soft);
+      font-size: 13px;
+    }
+
+    .status {
+      align-items: center;
+      display: inline-flex;
+      font-size: 13px;
+      font-weight: 600;
+      gap: 7px;
+    }
+
+    .status::before {
+      background: var(--cp-warning);
+      border-radius: 999px;
+      content: "";
+      height: 9px;
+      width: 9px;
+    }
+
+    .presenter-only {
+      display: block;
+    }
+
+    body.audience-mode .presenter-only {
+      display: none;
+    }
+
+    .toast {
+      background: var(--cp-panel-strong);
+      border: 1px solid var(--cp-border);
+      border-radius: 0.625rem;
+      bottom: 20px;
+      box-shadow: var(--cp-shadow);
+      color: var(--cp-text);
+      opacity: 0;
+      padding: 10px 14px;
+      pointer-events: none;
+      position: fixed;
+      right: 20px;
+      transform: translateY(8px);
+      transition: opacity 140ms ease, transform 140ms ease;
+      z-index: 20;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (max-width: 900px) {
+      .shell {
+        display: block;
+      }
+
+      .sidebar {
+        border-bottom: 1px solid var(--cp-border);
+        border-right: 0;
+        height: auto;
+        position: static;
+      }
+
+      .nav-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid.two,
+      .grid.three {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 680px) {
+      .architecture {
+        grid-template-columns: 1fr;
+      }
+
+      .arrow {
+        transform: rotate(90deg);
+      }
+
+      .nav-list {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        padding: 36px 22px;
+      }
+    }
+
+    @media print {
+      .shell {
+        display: block;
+      }
+
+      .sidebar,
+      .copy-btn,
+      .toast {
+        display: none;
+      }
+
+      .hero,
+      .main {
+        padding-left: 0;
+        padding-right: 0;
+      }
+
+      .stage {
+        break-inside: avoid;
+      }
+
+      .card {
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">AKS</div>
+        <div>
+          <strong>Workshop guide</strong>
+          <span>CI/CD to Layer 7 ingress</span>
+        </div>
+      </div>
+
+      <div class="progress-wrap">
+        <div class="progress-label">
+          <span>Demo progress</span>
+          <span id="progressText">0%</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+      </div>
+
+      <nav aria-label="Demo stages">
+        <ol class="nav-list">
+          <li><a href="#stage-0"><span class="nav-number">0</span> Before you begin</a></li>
+          <li><a href="#stage-1"><span class="nav-number">1</span> Meet the application</a></li>
+          <li><a href="#stage-2"><span class="nav-number">2</span> Service and load balancer</a></li>
+          <li><a href="#stage-3"><span class="nav-number">3</span> Build and deploy</a></li>
+          <li><a href="#stage-4"><span class="nav-number">4</span> Why ingress</a></li>
+          <li><a href="#stage-5"><span class="nav-number">5</span> Portal-created AGIC</a></li>
+          <li><a href="#stage-6"><span class="nav-number">6</span> Deploy the ingress</a></li>
+          <li><a href="#stage-7"><span class="nav-number">7</span> Compare both paths</a></li>
+          <li><a href="#stage-8"><span class="nav-number">8</span> Wrap-up and rollback</a></li>
+        </ol>
+      </nav>
+
+      <div class="sidebar-actions">
+        <button class="btn secondary" id="modeButton" type="button">Hide speaker notes</button>
+        <button class="btn secondary" id="resetButton" type="button">Reset checklist</button>
+        <button class="btn secondary" type="button" onclick="window.print()">Print guide</button>
+      </div>
+    </aside>
+
+    <div class="content">
+      <header class="hero">
+        <div class="eyebrow">Live demonstration script</div>
+        <h1>From a Kubernetes Service to Application Gateway ingress</h1>
+        <p class="hero-copy">
+          A guided walkthrough of the static website, its GitHub Actions delivery pipeline,
+          public LoadBalancer Service, and the optional Azure Application Gateway path managed by
+          AGIC.
+        </p>
+        <div class="hero-meta">
+          <span class="pill">Cluster: aks-workshop</span>
+          <span class="pill">Resource group: rg-aks-workshop</span>
+          <span class="pill">Registry: aksworkshopedg</span>
+          <span class="pill">Gateway: ingress-appgateway</span>
+          <span class="pill">Estimated time: 25-35 minutes</span>
+        </div>
+      </header>
+
+      <main class="main">
+        <section class="stage" id="stage-0">
+          <div class="stage-header">
+            <div class="stage-number">0</div>
+            <div>
+              <h2>Before you begin</h2>
+              <p class="stage-intro">Confirm the environment is healthy before sharing your screen.</p>
+            </div>
+          </div>
+
+          <div class="grid two">
+            <div class="card">
+              <h3>Presenter setup</h3>
+              <ul class="checklist">
+                <li><label><input type="checkbox"> Azure CLI is signed in to the workshop subscription.</label></li>
+                <li><label><input type="checkbox"> `kubectl` is connected to `aks-workshop`.</label></li>
+                <li><label><input type="checkbox"> GitHub Actions is open in a browser tab.</label></li>
+                <li><label><input type="checkbox"> Azure portal is open to `ingress-appgateway`.</label></li>
+                <li><label><input type="checkbox"> The existing website endpoint responds.</label></li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Gateway readiness gate</h3>
+              <p class="status">Check live status before the ingress stage</p>
+              <div class="code-wrap">
+                <div class="code-head"><span>PowerShell</span><button class="btn small secondary copy-btn">Copy</button></div>
+                <pre><code>az network application-gateway show `
+  --resource-group MC_rg-aks-workshop_aks-workshop_eastus `
+  --name ingress-appgateway `
+  --query "{provisioning:provisioningState,operational:operationalState}" `
+  --output table</code></pre>
+              </div>
+              <p class="muted">Continue to stage 6 only when the gateway is `Succeeded` and `Running`.</p>
+            </div>
+          </div>
+
+          <div class="speaker presenter-only">
+            <strong>Speaker note</strong>
+            <p>
+              "We will start with the simplest Kubernetes exposure model, prove the automated
+              delivery flow, and then add Layer 7 ingress without removing the original endpoint."
+            </p>
+          </div>
+        </section>
+
+        <section class="stage" id="stage-1">
+          <div class="stage-header">
+            <div class="stage-number">1</div>
+            <div>
+              <h2>Meet the application</h2>
+              <p class="stage-intro">Establish that application complexity is intentionally low.</p>
+            </div>
+          </div>
+
+          <div class="grid three">
+            <div class="card">
+              <h3>Static frontend</h3>
+              <p class="muted">Home, About, and Contact pages built with HTML, CSS, and Bootstrap.</p>
+            </div>
+            <div class="card">
+              <h3>Nginx container</h3>
+              <p class="muted">A small `nginx:1.27-alpine` image serves the files over port 80.</p>
+            </div>
+            <div class="card">
+              <h3>Two replicas</h3>
+              <p class="muted">Kubernetes maintains two pods with readiness, liveness, and resource controls.</p>
+            </div>
+          </div>
+
+          <div class="code-wrap">
+            <div class="code-head"><span>Show the workload</span><button class="btn small secondary copy-btn">Copy</button></div>
+            <pre><code>kubectl get deployment aks-static-website
+kubectl get pods --selector app=aks-static-website --output wide
+kubectl describe deployment aks-static-website</code></pre>
+          </div>
+
+          <div class="speaker presenter-only">
+            <strong>Talk track</strong>
+            <p>
+              "Because the app has no backend or database, every moving part we see is about
+              packaging, delivery, availability, and traffic management."
+            </p>
+          </div>
+        </section>
+
+        <section class="stage" id="stage-2">
+          <div class="stage-header">
+            <div class="stage-number">2</div>
+            <div>
+              <h2>Start with Service type LoadBalancer</h2>
+              <p class="stage-intro">Explain the direct public exposure model before introducing ingress.</p>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="architecture" aria-label="LoadBalancer Service architecture">
+              <div class="node"><strong>Internet client</strong><span>HTTP request</span></div>
+              <div class="arrow">-&gt;</div>
+              <div class="node"><strong>Azure Load Balancer</strong><span>Public IP on port 80</span></div>
+              <div class="arrow">-&gt;</div>
+              <div class="node"><strong>Website pods</strong><span>Service selects two replicas</span></div>
+            </div>
+          </div>
+
+          <div class="grid two">
+            <div class="card">
+              <h3>Inspect the Service</h3>
+              <div class="code-wrap">
+                <div class="code-head"><span>Commands</span><button class="btn small secondary copy-btn">Copy</button></div>
+                <pre><code>kubectl get service aks-static-website --output wide
+kubectl describe service aks-static-website
+kubectl get endpointslice `
+  --selector kubernetes.io/service-name=aks-static-website</code></pre>
+              </div>
+            </div>
+            <div class="card">
+              <h3>Key teaching points</h3>
+              <ul>
+                <li>Kubernetes asks Azure for a Layer 4 load balancer.</li>
+                <li>The Service exposes one public IP and port.</li>
+                <li>The selector routes to healthy website pods.</li>
+                <li>This is easy and effective for one simple service.</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="callout success">
+            <strong>Live test</strong>
+            Open the current Service external IP and navigate through all three pages.
+          </div>
+
+          <div class="speaker presenter-only">
+            <strong>Talk track</strong>
+            <p>
+              "A LoadBalancer Service is the quickest route from the internet to one Kubernetes
+              service. The tradeoff is that each public service can create its own Azure load
+              balancer configuration and it does not provide host or path routing."
+            </p>
+          </div>
+        </section>
+
+        <section class="stage" id="stage-3">
+          <div class="stage-header">
+            <div class="stage-number">3</div>
+            <div>
+              <h2>Build and deploy with GitHub Actions</h2>
+              <p class="stage-intro">Connect source control to ACR and AKS before changing the traffic path.</p>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="architecture" aria-label="CI CD architecture">
+              <div class="node"><strong>GitHub Actions</strong><span>OIDC authentication</span></div>
+              <div class="arrow">-&gt;</div>
+              <div class="node"><strong>ACR</strong><span>Immutable run-number tag</span></div>
+              <div class="arrow">-&gt;</div>
+              <div class="node"><strong>AKS</strong><span>Rolling deployment</span></div>
+            </div>
+          </div>
+
+          <table class="comparison">
+            <thead>
+              <tr><th>Workflow</th><th>Trigger</th><th>Responsibility</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Build and Push</td>
+                <td>Manual</td>
+                <td>Build Nginx image, tag with run number, push to `aksworkshopedg`.</td>
+              </tr>
+              <tr>
+                <td>Deploy to AKS</td>
+                <td>Successful build or manual</td>
+                <td>Apply base manifests, update the exact image, wait for rollout.</td>
+              </tr>
+              <tr>
+                <td>Deploy AGIC Ingress</td>
+                <td>Manual</td>
+                <td>Apply only the optional Application Gateway Ingress.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="callout">
+            <strong>Security point</strong>
+            GitHub exchanges a short-lived OIDC token for Azure access. No Azure client secret is
+            stored in the repository.
+          </div>
+
+          <div class="speaker presenter-only">
+            <strong>Optional live action</strong>
+            <p>
+              Run <strong>Build and Push</strong>, show the run-number image tag in ACR, and then
+              watch <strong>Deploy to AKS</strong> update both replicas.
+            </p>
+          </div>
+        </section>
+
+        <section class="stage" id="stage-4">
+          <div class="stage-header">
+            <div class="stage-number">4</div>
+            <div>
+              <h2>Why add an ingress layer?</h2>
+              <p class="stage-intro">Move from one public port to application-aware routing.</p>
+            </div>
+          </div>
+
+          <table class="comparison">
+            <thead>
+              <tr><th>Capability</th><th>LoadBalancer Service</th><th>Application Gateway + AGIC</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>OSI layer</td><td>Layer 4</td><td>Layer 7</td></tr>
+              <tr><td>Public entry point</td><td>One per Service</td><td>Shared gateway listeners</td></tr>
+              <tr><td>Path routing</td><td>No</td><td>Yes</td></tr>
+              <tr><td>Host routing</td><td>No</td><td>Yes</td></tr>
+              <tr><td>TLS termination</td><td>Not application-aware</td><td>Yes</td></tr>
+              <tr><td>WAF option</td><td>No</td><td>Available with WAF_v2</td></tr>
+              <tr><td>Kubernetes API object</td><td>Service</td><td>Ingress</td></tr>
+            </tbody>
+          </table>
+
+          <div class="speaker presenter-only">
+            <strong>Talk track</strong>
+            <p>
+              "Ingress does not replace a Service. It adds an HTTP routing layer in front of
+              Services. Our Ingress still sends traffic to `aks-static-website:80`."
+            </p>
+          </div>
+        </section>
+
+        <section class="stage" id="stage-5">
+          <div class="stage-header">
+            <div class="stage-number">5</div>
+            <div>
+              <h2>What the Azure portal created</h2>
+              <p class="stage-intro">Walk through the managed AGIC integration before deploying a route.</p>
+            </div>
+          </div>
+
+          <div class="grid two">
+            <div class="card">
+              <h3>Azure resources</h3>
+              <ul>
+                <li>`ingress-appgateway` using Standard_v2</li>
+                <li>Static public IP resource</li>
+                <li>Dedicated `10.225.0.0/24` subnet</li>
+                <li>AGIC managed identity</li>
+                <li>Network Contributor on the node resource group</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Kubernetes resources</h3>
+              <ul>
+                <li>`ingress-appgw-deployment` in `kube-system`</li>
+                <li>`azure-application-gateway` IngressClass</li>
+                <li>Existing NGINX class remains installed</li>
+                <li>No Ingress exists until the optional workflow runs</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="code-wrap">
+            <div class="code-head"><span>Inspect AGIC</span><button class="btn small secondary copy-btn">Copy</button></div>
+            <pre><code>kubectl get deployment ingress-appgw-deployment `
+  --namespace kube-system
+
+kubectl get ingressclass --output wide
+kubectl get ingress --all-namespaces</code></pre>
+          </div>
+
+          <div class="callout warning">
+            <strong>Ownership warning</strong>
+            AGIC treats Kubernetes Ingress as the source of truth and can overwrite listeners,
+            pools, rules, settings, and probes edited manually on its gateway.
+          </div>
+        </section>
+
+        <section class="stage" id="stage-6">
+          <div class="stage-header">
+            <div class="stage-number">6</div>
+            <div>
+              <h2>Deploy the Application Gateway Ingress</h2>
+              <p class="stage-intro">Use the isolated manual workflow only after the gateway is running.</p>
+            </div>
+          </div>
+
+          <div class="grid two">
+            <div class="card">
+              <h3>The Kubernetes route</h3>
+              <div class="code-wrap">
+                <div class="code-head"><span>k8s/agic/ingress.yaml</span><button class="btn small secondary copy-btn">Copy</button></div>
+                <pre><code>spec:
+  ingressClassName: azure-application-gateway
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aks-static-website
+                port:
+                  number: 80</code></pre>
+              </div>
+            </div>
+            <div class="card">
+              <h3>Run the workflow</h3>
+              <ol>
+                <li>Open GitHub Actions.</li>
+                <li>Select <strong>Deploy AGIC Ingress</strong>.</li>
+                <li>Choose <strong>Run workflow</strong> on `main`.</li>
+                <li>Watch AGIC controller readiness.</li>
+                <li>Watch the Ingress address appear.</li>
+                <li>Open the tested endpoint.</li>
+              </ol>
+            </div>
+          </div>
+
+          <div class="callout">
+            <strong>Why a separate workflow?</strong>
+            The base CD workflow intentionally does not recurse into `k8s/agic/`. Application
+            releases remain independent from optional ingress configuration.
+          </div>
+
+          <div class="code-wrap">
+            <div class="code-head"><span>Observe reconciliation</span><button class="btn small secondary copy-btn">Copy</button></div>
+            <pre><code>kubectl get ingress aks-static-website --watch
+kubectl describe ingress aks-static-website
+
+az network application-gateway show-backend-health `
+  --resource-group MC_rg-aks-workshop_aks-workshop_eastus `
+  --name ingress-appgateway `
+  --output table</code></pre>
+          </div>
+
+          <div class="speaker presenter-only">
+            <strong>Talk track</strong>
+            <p>
+              "The workflow creates only a Kubernetes Ingress. AGIC observes it and programs the
+              Azure gateway. This is the control loop that connects Kubernetes intent to Azure
+              infrastructure."
+            </p>
+          </div>
+        </section>
+
+        <section class="stage" id="stage-7">
+          <div class="stage-header">
+            <div class="stage-number">7</div>
+            <div>
+              <h2>Compare both public paths</h2>
+              <p class="stage-intro">Prove that Application Gateway was added without removing the original endpoint.</p>
+            </div>
+          </div>
+
+          <div class="grid two">
+            <div class="card">
+              <h3>Original Service endpoint</h3>
+              <div class="code-wrap">
+                <div class="code-head"><span>Command</span><button class="btn small secondary copy-btn">Copy</button></div>
+                <pre><code>kubectl get service aks-static-website `
+  --output jsonpath="{.status.loadBalancer.ingress[0].ip}"</code></pre>
+              </div>
+              <p class="muted">Layer 4 route through the Kubernetes LoadBalancer Service.</p>
+            </div>
+            <div class="card">
+              <h3>Application Gateway endpoint</h3>
+              <div class="code-wrap">
+                <div class="code-head"><span>Command</span><button class="btn small secondary copy-btn">Copy</button></div>
+                <pre><code>kubectl get ingress aks-static-website `
+  --output jsonpath="{.status.loadBalancer.ingress[0].ip}"</code></pre>
+              </div>
+              <p class="muted">Layer 7 route through Application Gateway and AGIC.</p>
+            </div>
+          </div>
+
+          <ul class="checklist">
+            <li><label><input type="checkbox"> Home page loads through both endpoints.</label></li>
+            <li><label><input type="checkbox"> About page loads through both endpoints.</label></li>
+            <li><label><input type="checkbox"> Contact page loads through both endpoints.</label></li>
+            <li><label><input type="checkbox"> Application Gateway backend health is Healthy.</label></li>
+            <li><label><input type="checkbox"> Both website replicas remain Ready.</label></li>
+          </ul>
+
+          <div class="speaker presenter-only">
+            <strong>Discussion prompt</strong>
+            <p>
+              Ask the audience which path they would choose for a single service, and when host
+              routing, path routing, centralized TLS, or WAF would justify an ingress gateway.
+            </p>
+          </div>
+        </section>
+
+        <section class="stage" id="stage-8">
+          <div class="stage-header">
+            <div class="stage-number">8</div>
+            <div>
+              <h2>Wrap-up and rollback</h2>
+              <p class="stage-intro">Finish with the operational model and a safe reversal path.</p>
+            </div>
+          </div>
+
+          <div class="grid two">
+            <div class="card">
+              <h3>What students learned</h3>
+              <ul>
+                <li>How a LoadBalancer Service exposes a workload</li>
+                <li>How GitHub OIDC removes stored Azure credentials</li>
+                <li>How immutable image tags flow from CI to CD</li>
+                <li>How AGIC translates Ingress into gateway configuration</li>
+                <li>Why the two traffic paths can coexist</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Application rollback</h3>
+              <div class="code-wrap">
+                <div class="code-head"><span>Remove only the optional route</span><button class="btn small secondary copy-btn">Copy</button></div>
+                <pre><code>kubectl delete --filename k8s/agic/ingress.yaml
+kubectl get service aks-static-website --output wide</code></pre>
+              </div>
+              <p class="muted">The original LoadBalancer Service remains available.</p>
+            </div>
+          </div>
+
+          <div class="callout warning">
+            <strong>Do not use application rollback to delete infrastructure</strong>
+            Disabling the AGIC add-on or deleting Application Gateway, its subnet, identity, or
+            public IP requires a separate reviewed cleanup plan.
+          </div>
+
+          <div class="speaker presenter-only">
+            <strong>Closing line</strong>
+            <p>
+              "We started with one public Kubernetes Service, automated its releases, and then
+              layered in application-aware routing while preserving a working fallback."
+            </p>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite">Copied to clipboard</div>
+
+  <script>
+    const checkboxes = Array.from(document.querySelectorAll('.checklist input[type="checkbox"]'));
+    const progressBar = document.getElementById("progressBar");
+    const progressText = document.getElementById("progressText");
+    const toast = document.getElementById("toast");
+
+    function updateProgress() {
+      const checked = checkboxes.filter((box) => box.checked).length;
+      const percent = checkboxes.length ? Math.round((checked / checkboxes.length) * 100) : 0;
+      progressBar.style.width = `${percent}%`;
+      progressText.textContent = `${percent}%`;
+    }
+
+    checkboxes.forEach((box) => box.addEventListener("change", updateProgress));
+
+    document.getElementById("resetButton").addEventListener("click", () => {
+      checkboxes.forEach((box) => {
+        box.checked = false;
+      });
+      updateProgress();
+    });
+
+    document.getElementById("modeButton").addEventListener("click", (event) => {
+      const audienceMode = document.body.classList.toggle("audience-mode");
+      event.currentTarget.textContent = audienceMode ? "Show speaker notes" : "Hide speaker notes";
+    });
+
+    document.querySelectorAll(".copy-btn").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const code = button.closest(".code-wrap").querySelector("code").textContent;
+        try {
+          await navigator.clipboard.writeText(code);
+          toast.textContent = "Copied to clipboard";
+        } catch {
+          toast.textContent = "Clipboard access is unavailable";
+        }
+        toast.classList.add("show");
+        window.setTimeout(() => toast.classList.remove("show"), 1400);
+      });
+    });
+
+    const sections = Array.from(document.querySelectorAll(".stage"));
+    const navLinks = Array.from(document.querySelectorAll(".nav-list a"));
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        if (!visible) return;
+        navLinks.forEach((link) => {
+          link.classList.toggle("active", link.getAttribute("href") === `#${visible.target.id}`);
+        });
+      },
+      { rootMargin: "-20% 0px -65% 0px", threshold: [0.05, 0.25, 0.5] }
+    );
+
+    sections.forEach((section) => observer.observe(section));
+    updateProgress();
+  </script>
+</body>
+</html>
