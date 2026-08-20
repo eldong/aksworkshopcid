@@ -653,13 +653,13 @@
       <nav aria-label="Demo stages">
         <ol class="nav-list">
           <li><a href="#stage-0"><span class="nav-number">0</span> Before you begin</a></li>
-          <li><a href="#stage-1"><span class="nav-number">1</span> Meet the application</a></li>
-          <li><a href="#stage-2"><span class="nav-number">2</span> Service and load balancer</a></li>
-          <li><a href="#stage-3"><span class="nav-number">3</span> Build and deploy</a></li>
+          <li><a href="#stage-1"><span class="nav-number">1</span> Portal: workload</a></li>
+          <li><a href="#stage-2"><span class="nav-number">2</span> Portal: Service</a></li>
+          <li><a href="#stage-3"><span class="nav-number">3</span> Action 1: build</a></li>
           <li><a href="#stage-4"><span class="nav-number">4</span> Why ingress</a></li>
-          <li><a href="#stage-5"><span class="nav-number">5</span> Portal-created AGIC</a></li>
-          <li><a href="#stage-6"><span class="nav-number">6</span> Deploy the ingress</a></li>
-          <li><a href="#stage-7"><span class="nav-number">7</span> Compare both paths</a></li>
+          <li><a href="#stage-5"><span class="nav-number">5</span> Portal: AGIC</a></li>
+          <li><a href="#stage-6"><span class="nav-number">6</span> Action 2: ingress</a></li>
+          <li><a href="#stage-7"><span class="nav-number">7</span> Portal: compare paths</a></li>
           <li><a href="#stage-8"><span class="nav-number">8</span> Wrap-up and rollback</a></li>
         </ol>
       </nav>
@@ -676,8 +676,8 @@
         <div class="eyebrow">Live demonstration script</div>
         <h1>From a Kubernetes Service to Application Gateway ingress</h1>
         <p class="hero-copy">
-          A guided walkthrough of the static website, its GitHub Actions delivery pipeline,
-          public LoadBalancer Service, and the optional Azure Application Gateway path managed by
+          A portal-first walkthrough of the static website, its AKS workload and Service, the two
+          GitHub Actions you run during class, and the Azure Application Gateway path managed by
           AGIC.
         </p>
         <div class="hero-meta">
@@ -695,7 +695,7 @@
             <div class="stage-number">0</div>
             <div>
               <h2>Before you begin</h2>
-              <p class="stage-intro">Confirm the environment is healthy before sharing your screen.</p>
+              <p class="stage-intro">Open the portal and GitHub pages in advance, then confirm the reset state.</p>
             </div>
           </div>
 
@@ -703,25 +703,24 @@
             <div class="card">
               <h3>Presenter setup</h3>
               <ul class="checklist">
-                <li><label><input type="checkbox"> Azure CLI is signed in to the workshop subscription.</label></li>
-                <li><label><input type="checkbox"> `kubectl` is connected to `aks-workshop`.</label></li>
-                <li><label><input type="checkbox"> GitHub Actions is open in a browser tab.</label></li>
-                <li><label><input type="checkbox"> Azure portal is open to `ingress-appgateway`.</label></li>
-                <li><label><input type="checkbox"> The existing website endpoint responds.</label></li>
+                <li><label><input type="checkbox"> Azure portal is open to AKS cluster `aks-workshop`.</label></li>
+                <li><label><input type="checkbox"> AKS <strong>Workloads</strong> shows the website Deployment and two pods.</label></li>
+                <li><label><input type="checkbox"> AKS <strong>Services and ingresses</strong> has no website Service or Ingress.</label></li>
+                <li><label><input type="checkbox"> GitHub repository <strong>Actions</strong> is open in another tab.</label></li>
+                <li><label><input type="checkbox"> Application Gateway `ingress-appgateway` is open in another portal tab.</label></li>
               </ul>
             </div>
             <div class="card">
-              <h3>Gateway readiness gate</h3>
-              <p class="status">Check live status before the ingress stage</p>
-              <div class="code-wrap">
-                <div class="code-head"><span>PowerShell</span><button class="btn small secondary copy-btn">Copy</button></div>
-                <pre><code>az network application-gateway show `
-  --resource-group MC_rg-aks-workshop_aks-workshop_eastus `
-  --name ingress-appgateway `
-  --query "{provisioning:provisioningState,operational:operationalState}" `
-  --output table</code></pre>
-              </div>
-              <p class="muted">Continue to stage 6 only when the gateway is `Succeeded` and `Running`.</p>
+              <h3>Portal tabs to prepare</h3>
+              <ol>
+                <li>AKS: <strong>Workloads</strong></li>
+                <li>AKS: <strong>Services and ingresses</strong></li>
+                <li>ACR `aksworkshopedg`: <strong>Repositories</strong></li>
+                <li>Application Gateway: <strong>Overview</strong></li>
+                <li>Application Gateway: <strong>Backend health</strong></li>
+                <li>GitHub: <strong>Actions</strong></li>
+              </ol>
+              <p class="muted">Portal navigation is the primary demo path; CLI commands are optional verification.</p>
             </div>
           </div>
 
@@ -738,8 +737,8 @@
           <div class="stage-header">
             <div class="stage-number">1</div>
             <div>
-              <h2>Meet the application</h2>
-              <p class="stage-intro">Establish that application complexity is intentionally low.</p>
+              <h2>Show the workload in the Azure portal</h2>
+              <p class="stage-intro">Start in AKS and establish what is already running before creating public routes.</p>
             </div>
           </div>
 
@@ -758,11 +757,20 @@
             </div>
           </div>
 
-          <div class="code-wrap">
-            <div class="code-head"><span>Show the workload</span><button class="btn small secondary copy-btn">Copy</button></div>
-            <pre><code>kubectl get deployment aks-static-website
-kubectl get pods --selector app=aks-static-website --output wide
-kubectl describe deployment aks-static-website</code></pre>
+          <div class="callout">
+            <strong>Portal path</strong>
+            Azure portal -> `aks-workshop` -> Kubernetes resources -> <strong>Workloads</strong>.
+            Open `aks-static-website`, show two ready replicas, then open the Pods tab and point out
+            readiness, age, and image.
+          </div>
+
+          <div class="speaker presenter-only">
+            <strong>Portal cue</strong>
+            <p>
+              Open the Deployment YAML view and highlight `replicas: 2`, the ACR image, resource
+              requests/limits, and HTTP probes. Avoid spending time in the terminal unless the
+              portal is slow to refresh.
+            </p>
           </div>
 
           <div class="speaker presenter-only">
@@ -778,8 +786,8 @@ kubectl describe deployment aks-static-website</code></pre>
           <div class="stage-header">
             <div class="stage-number">2</div>
             <div>
-              <h2>Start with Service type LoadBalancer</h2>
-              <p class="stage-intro">Explain the direct public exposure model before introducing ingress.</p>
+              <h2>Introduce the LoadBalancer Service in the portal</h2>
+              <p class="stage-intro">Show the reset state, explain what the first action will create, then return after deployment.</p>
             </div>
           </div>
 
@@ -795,14 +803,12 @@ kubectl describe deployment aks-static-website</code></pre>
 
           <div class="grid two">
             <div class="card">
-              <h3>Inspect the Service</h3>
-              <div class="code-wrap">
-                <div class="code-head"><span>Commands</span><button class="btn small secondary copy-btn">Copy</button></div>
-                <pre><code>kubectl get service aks-static-website --output wide
-kubectl describe service aks-static-website
-kubectl get endpointslice `
-  --selector kubernetes.io/service-name=aks-static-website</code></pre>
-              </div>
+              <h3>Before Action 1</h3>
+              <p>Portal path: AKS -> Kubernetes resources -> <strong>Services and ingresses</strong>.</p>
+              <p class="muted">
+                Confirm `aks-static-website` is absent. The repository still contains
+                `k8s/service.yaml`, so the automatic deployment will recreate it.
+              </p>
             </div>
             <div class="card">
               <h3>Key teaching points</h3>
@@ -816,8 +822,10 @@ kubectl get endpointslice `
           </div>
 
           <div class="callout success">
-            <strong>Live test</strong>
-            Open the current Service external IP and navigate through all three pages.
+            <strong>Return here after Action 1</strong>
+            Refresh <strong>Services and ingresses</strong>, open `aks-static-website`, show type
+            `LoadBalancer`, port 80, selector, and the newly assigned external IP. Open that IP and
+            navigate through all three pages.
           </div>
 
           <div class="speaker presenter-only">
@@ -834,8 +842,8 @@ kubectl get endpointslice `
           <div class="stage-header">
             <div class="stage-number">3</div>
             <div>
-              <h2>Build and deploy with GitHub Actions</h2>
-              <p class="stage-intro">Connect source control to ACR and AKS before changing the traffic path.</p>
+              <h2>Action 1: Run Build and Push</h2>
+              <p class="stage-intro">Run one workflow manually, then show the automatic deployment and resulting portal resources.</p>
             </div>
           </div>
 
@@ -871,6 +879,37 @@ kubectl get endpointslice `
               </tr>
             </tbody>
           </table>
+
+          <div class="grid two">
+            <div class="card">
+              <h3>Run the first action</h3>
+              <ol>
+                <li>Open GitHub repository <strong>Actions</strong>.</li>
+                <li>Select <strong>Build and Push</strong>.</li>
+                <li>Choose <strong>Run workflow</strong>.</li>
+                <li>Keep branch `main` selected.</li>
+                <li>Choose the green <strong>Run workflow</strong> button.</li>
+                <li>Open the new run and expand each completed step.</li>
+              </ol>
+            </div>
+            <div class="card">
+              <h3>Follow the automatic deployment</h3>
+              <ol>
+                <li>Wait for <strong>Build and Push</strong> to succeed.</li>
+                <li>Return to the Actions list.</li>
+                <li>Open the automatically started <strong>Deploy to AKS</strong> run.</li>
+                <li>Show artifact download, manifest apply, image update, and rollout.</li>
+                <li>Do not manually run Deploy to AKS for this sequence.</li>
+              </ol>
+            </div>
+          </div>
+
+          <div class="callout success">
+            <strong>Verify in the Azure portal</strong>
+            In ACR, open Repositories -> `aks-static-website` and show the new run-number tag.
+            In AKS, refresh Workloads to show the image tag, then refresh Services and ingresses to
+            show the recreated LoadBalancer Service and external IP.
+          </div>
 
           <div class="callout">
             <strong>Security point</strong>
@@ -924,8 +963,8 @@ kubectl get endpointslice `
           <div class="stage-header">
             <div class="stage-number">5</div>
             <div>
-              <h2>What the Azure portal created</h2>
-              <p class="stage-intro">Walk through the managed AGIC integration before deploying a route.</p>
+              <h2>Explore AGIC and Application Gateway in the portal</h2>
+              <p class="stage-intro">Show the infrastructure created by enabling Application Gateway ingress controller.</p>
             </div>
           </div>
 
@@ -951,13 +990,13 @@ kubectl get endpointslice `
             </div>
           </div>
 
-          <div class="code-wrap">
-            <div class="code-head"><span>Inspect AGIC</span><button class="btn small secondary copy-btn">Copy</button></div>
-            <pre><code>kubectl get deployment ingress-appgw-deployment `
-  --namespace kube-system
-
-kubectl get ingressclass --output wide
-kubectl get ingress --all-namespaces</code></pre>
+          <div class="callout">
+            <strong>Portal walkthrough</strong>
+            In AKS, open Networking -> Application Gateway ingress controller and identify
+            `ingress-appgateway`. Then open the gateway in
+            `MC_rg-aks-workshop_aks-workshop_eastus`. Show Overview, Frontend IP configurations,
+            Backend pools, Listeners, Rules, and Backend health. Before Action 2, the website
+            Ingress is absent and AGIC has not yet added the website route.
           </div>
 
           <div class="callout warning">
@@ -971,8 +1010,8 @@ kubectl get ingress --all-namespaces</code></pre>
           <div class="stage-header">
             <div class="stage-number">6</div>
             <div>
-              <h2>Deploy the Application Gateway Ingress</h2>
-              <p class="stage-intro">Use the isolated manual workflow only after the gateway is running.</p>
+              <h2>Action 2: Run Deploy AGIC Ingress</h2>
+              <p class="stage-intro">Run the second manual action, then watch Kubernetes intent appear as gateway configuration.</p>
             </div>
           </div>
 
@@ -998,12 +1037,13 @@ kubectl get ingress --all-namespaces</code></pre>
             <div class="card">
               <h3>Run the workflow</h3>
               <ol>
-                <li>Open GitHub Actions.</li>
+                <li>Open GitHub repository <strong>Actions</strong>.</li>
                 <li>Select <strong>Deploy AGIC Ingress</strong>.</li>
                 <li>Choose <strong>Run workflow</strong> on `main`.</li>
-                <li>Watch AGIC controller readiness.</li>
-                <li>Watch the Ingress address appear.</li>
-                <li>Open the tested endpoint.</li>
+                <li>Open the new run.</li>
+                <li>Show controller verification and manifest apply.</li>
+                <li>Watch the workflow wait for the Ingress address.</li>
+                <li>Show the endpoint test and final resource output.</li>
               </ol>
             </div>
           </div>
@@ -1014,15 +1054,11 @@ kubectl get ingress --all-namespaces</code></pre>
             releases remain independent from optional ingress configuration.
           </div>
 
-          <div class="code-wrap">
-            <div class="code-head"><span>Observe reconciliation</span><button class="btn small secondary copy-btn">Copy</button></div>
-            <pre><code>kubectl get ingress aks-static-website --watch
-kubectl describe ingress aks-static-website
-
-az network application-gateway show-backend-health `
-  --resource-group MC_rg-aks-workshop_aks-workshop_eastus `
-  --name ingress-appgateway `
-  --output table</code></pre>
+          <div class="callout success">
+            <strong>Verify in the Azure portal</strong>
+            Refresh AKS -> Services and ingresses and open the new `aks-static-website` Ingress.
+            Then refresh Application Gateway Backend pools, Listeners, Rules, and Backend health.
+            Show how AGIC translated the Kubernetes Ingress into Azure configuration.
           </div>
 
           <div class="speaker presenter-only">
@@ -1039,29 +1075,21 @@ az network application-gateway show-backend-health `
           <div class="stage-header">
             <div class="stage-number">7</div>
             <div>
-              <h2>Compare both public paths</h2>
-              <p class="stage-intro">Prove that Application Gateway was added without removing the original endpoint.</p>
+              <h2>Compare both paths in the portal</h2>
+              <p class="stage-intro">Use AKS and Application Gateway blades to identify and test both public endpoints.</p>
             </div>
           </div>
 
           <div class="grid two">
             <div class="card">
               <h3>Original Service endpoint</h3>
-              <div class="code-wrap">
-                <div class="code-head"><span>Command</span><button class="btn small secondary copy-btn">Copy</button></div>
-                <pre><code>kubectl get service aks-static-website `
-  --output jsonpath="{.status.loadBalancer.ingress[0].ip}"</code></pre>
-              </div>
-              <p class="muted">Layer 4 route through the Kubernetes LoadBalancer Service.</p>
+              <p>AKS -> Services and ingresses -> `aks-static-website` Service.</p>
+              <p class="muted">Open its External IP to test the Layer 4 LoadBalancer path.</p>
             </div>
             <div class="card">
               <h3>Application Gateway endpoint</h3>
-              <div class="code-wrap">
-                <div class="code-head"><span>Command</span><button class="btn small secondary copy-btn">Copy</button></div>
-                <pre><code>kubectl get ingress aks-static-website `
-  --output jsonpath="{.status.loadBalancer.ingress[0].ip}"</code></pre>
-              </div>
-              <p class="muted">Layer 7 route through Application Gateway and AGIC.</p>
+              <p>Application Gateway -> Frontend IP configurations -> public frontend.</p>
+              <p class="muted">Open its public IP to test the Layer 7 AGIC path.</p>
             </div>
           </div>
 
