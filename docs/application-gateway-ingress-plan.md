@@ -1,24 +1,29 @@
-# Application Gateway Ingress Plan
+# Application Gateway for Containers Plan
 
-> **Status:** Planning only. No Azure resources, AKS add-ons, Kubernetes objects, DNS records, or
-> workflow changes described in this document have been created or applied.
+> **Status:** Planning only. No Azure resources, AKS features, Kubernetes resources, DNS records,
+> or workflow changes described here have been created or applied.
 
 ## Goal
 
-Expose the existing `aks-static-website` workload through Azure Application Gateway and use a
-Kubernetes `Ingress` resource to demonstrate Layer 7 routing.
+Expose `aks-static-website` through **Azure Application Gateway for Containers** using the
+AKS-managed ALB Controller add-on and Kubernetes Gateway API.
 
-This plan focuses on **classic Azure Application Gateway with the Application Gateway Ingress
-Controller (AGIC) AKS add-on** because that is the clearest way to demonstrate Application Gateway
-as a Kubernetes ingress controller.
+Classic Application Gateway and Application Gateway Ingress Controller (AGIC) are intentionally
+out of scope. This plan uses Microsoft's newer Kubernetes-focused ingress platform.
 
-Microsoft recommends considering the newer **Application Gateway for Containers** for new
-Kubernetes ingress implementations. That alternative is described later in this document.
+## Why this approach fits
+
+- Application Gateway for Containers is designed specifically for Kubernetes.
+- Microsoft recommends considering it for new Kubernetes ingress implementations.
+- The cluster uses supported Azure CNI Overlay networking.
+- The cluster is in the supported `eastus` region.
+- A correctly sized and delegated subnet already exists.
+- Gateway API provides a clearer modern routing model than legacy Ingress annotations.
+- The platform supports HTTP/HTTPS, WAF, traffic splitting, retries, rewrites, gRPC, and TLS.
 
 ## Current environment
 
-The following values were discovered through read-only Azure and Kubernetes queries on
-August 19, 2026:
+Read-only discovery on August 19, 2026 found:
 
 | Item | Current value |
 |------|---------------|
@@ -28,46 +33,17 @@ August 19, 2026:
 | Kubernetes version | `1.35.6` |
 | Network plugin | Azure CNI Overlay |
 | Pod CIDR | `10.244.0.0/16` |
+| AKS node resource group | `MC_rg-aks-workshop_aks-workshop_eastus` |
 | AKS virtual network | `aks-vnet-38181049` |
-| AKS virtual network address space | `10.224.0.0/12` |
-| AKS node subnet | `aks-subnet` (`10.224.0.0/16`) |
-| Existing gateway-named subnet | `aks-appgateway` (`10.238.0.0/24`) |
-| Current ingress class | `nginx` (`k8s.io/ingress-nginx`) |
-| Existing Application Gateway | None |
-| AGIC add-on | Not enabled |
-| GitHub deployment identity | `github-aksworkshop-cicd` |
+| ALB subnet | `aks-appgateway` (`10.238.0.0/24`) |
+| ALB subnet delegation | `Microsoft.ServiceNetworking/trafficControllers` |
+| Current ingress controller | NGINX |
+| ALB Controller | Not currently detected |
+| Existing Application Gateway for Containers | None detected |
 
-The existing deployment identity can create Kubernetes Ingress resources. No additional Azure
-role is expected for the GitHub identity because AGIC—not the GitHub workflow—configures
-Application Gateway.
-
-## Important subnet finding
-
-The existing `aks-appgateway` subnet is delegated to:
-
-```text
-Microsoft.ServiceNetworking/trafficControllers
-```
-
-That delegation is used by **Application Gateway for Containers**. A classic Application Gateway
-requires a dedicated subnet that contains only Application Gateway resources and is not delegated
-to the Application Gateway for Containers traffic-controller service.
-
-Do not remove the existing delegation merely to reuse the subnet. Removing it would discard the
-cluster's existing readiness for Application Gateway for Containers and would introduce an
-unnecessary destructive change.
-
-For the classic AGIC demonstration, create a separate subnet. A proposed unused range is:
-
-```text
-Name:   snet-appgw-agic
-CIDR:   10.237.0.0/24
-VNet:   aks-vnet-38181049
-VNet RG: MC_rg-aks-workshop_aks-workshop_eastus
-```
-
-The range must be checked again immediately before implementation in case the virtual network has
-changed. A `/24` is recommended for Application Gateway v2 autoscaling and maintenance capacity.
+The existing `aks-appgateway` subnet meets the documented minimum of 250 available addresses and
+has the required delegation. No new subnet should be created unless revalidation finds the subnet
+unavailable or incorrectly configured.
 
 ## Proposed architecture
 
@@ -75,70 +51,85 @@ changed. A `/24` is recommended for Application Gateway v2 autoscaling and maint
 Internet
    |
    v
-Static Standard public IP
+Application Gateway for Containers public frontend
+   |
+   | Azure-managed Layer 7 data plane
+   v
+Association through aks-appgateway subnet
    |
    v
-Azure Application Gateway Standard_v2
-   |
-   |  AGIC translates Kubernetes Ingress configuration
-   v
-AKS pod IPs through Azure CNI Overlay
+Gateway API Gateway + HTTPRoute
    |
    v
-aks-static-website Service
+aks-static-website ClusterIP Service
    |
    v
 Two Nginx website pods
 ```
 
-AGIC watches Kubernetes Ingress resources annotated with:
+ALB Controller runs in AKS and translates these Kubernetes resources into Azure configuration:
 
-```yaml
-kubernetes.io/ingress.class: azure/application-gateway
+- `ApplicationLoadBalancer`
+- `Gateway`
+- `HTTPRoute`
+
+## Management model
+
+Use the **managed by ALB Controller** strategy for this workshop:
+
+- AKS manages installation and upgrades of ALB Controller.
+- A Kubernetes `ApplicationLoadBalancer` resource causes ALB Controller to create the Azure
+  Application Gateway for Containers resource and association.
+- Kubernetes resources control the Azure resource lifecycle.
+- The workshop demonstrates a Kubernetes-native workflow without requiring separate Terraform or
+  Bicep.
+
+The bring-your-own Azure resource strategy is more appropriate when a platform team needs explicit
+Azure-side lifecycle control. It is unnecessary for this demonstration.
+
+## Planned Azure and AKS changes
+
+| Change | Purpose |
+|--------|---------|
+| Register required Azure providers and preview features if needed | Enable the managed add-ons |
+| Enable OIDC issuer and AKS Workload Identity | Required by the ALB Controller add-on |
+| Enable AKS Gateway API add-on | Install supported Gateway API resources |
+| Enable Application Load Balancer add-on | Install and manage ALB Controller |
+| Use existing `aks-appgateway` subnet | Connect the managed data plane to AKS |
+| Add ALB identity subnet permission if required | Allow the association to join the subnet |
+
+The add-on creates a managed identity named:
+
+```text
+applicationloadbalancer-aks-workshop
 ```
 
-It then creates and maintains the corresponding Application Gateway listener, routing rule,
-backend pool, HTTP settings, and health probe.
+Microsoft documents that the add-on normally assigns this identity `Network Contributor`,
+`AppGW for Containers Configuration Manager`, and `Reader` in the AKS node resource group. These
+assignments must be verified after enablement rather than duplicated blindly.
 
-## Proposed Azure resources
-
-| Resource | Proposed name | Notes |
-|----------|---------------|-------|
-| Application Gateway subnet | `snet-appgw-agic` | New `10.237.0.0/24` subnet in the AKS VNet |
-| Public IP | `pip-agw-aks-workshop` | Standard SKU with static allocation |
-| Application Gateway | `agw-aks-workshop` | `Standard_v2` for the basic workshop |
-| AGIC managed identity | Created by AKS add-on | Typically named `ingressapplicationgateway-aks-workshop` |
-
-Use `WAF_v2` instead of `Standard_v2` if demonstrating managed WAF policies is part of the
-workshop. WAF adds security capabilities and additional cost/complexity, so `Standard_v2` is the
-recommended first iteration.
-
-## Why the gateway must use the AKS virtual network
-
-The cluster uses Azure CNI Overlay. Current Microsoft guidance requires Application Gateway and an
-Azure CNI Overlay AKS cluster to be in the same virtual network for the AGIC scenario.
-
-This means the new subnet must be added to the AKS virtual network in the AKS-managed node resource
-group. That change should be made carefully: do not alter or delete existing AKS-managed subnets,
-route tables, public IPs, or load balancer resources.
+The existing GitHub identity, `github-aksworkshop-cicd`, should not receive Azure network or
+Application Gateway roles. It only needs enough Kubernetes authorization to apply the planned
+Gateway API manifests.
 
 ## Implementation phases
 
-The following commands are examples for a future implementation. They are intentionally not run
-as part of this plan.
+The following commands are examples for a future implementation. They have not been run.
 
-### Phase 1: Revalidate the environment
+### Phase 1: Revalidate prerequisites
 
-Before making changes:
+Confirm:
 
-1. Confirm the active Azure subscription and tenant.
-2. Confirm that `10.237.0.0/24` is still unused.
-3. Confirm that no Application Gateway has been created since this plan was written.
-4. Confirm the current AKS network mode is still Azure CNI Overlay.
-5. Export or otherwise record the current AKS add-on configuration.
-6. Record the current public website endpoint for rollback testing.
+1. The active subscription and tenant are correct.
+2. `eastus` still supports Application Gateway for Containers.
+3. AKS remains on a supported Kubernetes version.
+4. The cluster still uses Azure CNI or Azure CNI Overlay.
+5. `aks-appgateway` remains `/24`, empty, and delegated only to
+   `Microsoft.ServiceNetworking/trafficControllers`.
+6. No existing Application Gateway for Containers deployment owns the subnet.
+7. Required Azure resource providers and features are registered.
 
-Example read-only commands:
+Example checks:
 
 ```powershell
 az account show --output table
@@ -146,306 +137,375 @@ az account show --output table
 az aks show `
   --resource-group rg-aks-workshop `
   --name aks-workshop `
-  --query "{networkProfile:networkProfile,addonProfiles:addonProfiles}" `
+  --query "{location:location,kubernetesVersion:kubernetesVersion,networkProfile:networkProfile,oidcIssuerProfile:oidcIssuerProfile,securityProfile:securityProfile,ingressProfile:ingressProfile}" `
   --output json
 
-az network vnet subnet list `
+az network vnet subnet show `
   --resource-group MC_rg-aks-workshop_aks-workshop_eastus `
   --vnet-name aks-vnet-38181049 `
-  --output table
+  --name aks-appgateway `
+  --output json
 ```
 
-### Phase 2: Create a dedicated AGIC subnet
+### Phase 2: Register required capabilities
 
-Create a nondelegated `/24` subnet for classic Application Gateway:
+Current Microsoft add-on guidance calls for these providers, CLI extensions, and preview features:
 
 ```powershell
-az network vnet subnet create `
-  --resource-group MC_rg-aks-workshop_aks-workshop_eastus `
-  --vnet-name aks-vnet-38181049 `
-  --name snet-appgw-agic `
-  --address-prefixes 10.237.0.0/24
+az provider register --namespace Microsoft.ContainerService
+az provider register --namespace Microsoft.Network
+az provider register --namespace Microsoft.NetworkFunction
+az provider register --namespace Microsoft.ServiceNetworking
+
+az extension add --name alb
+az extension add --name aks-preview
+
+az feature register `
+  --namespace Microsoft.ContainerService `
+  --name ManagedGatewayAPIPreview
+
+az feature register `
+  --namespace Microsoft.ContainerService `
+  --name ApplicationLoadBalancerPreview
 ```
 
-Do not reuse:
+Feature registration can take time. Wait until each feature reports `Registered` before enabling
+the add-ons. Re-register the `Microsoft.ContainerService` provider if Azure requires it after
+feature registration.
 
-- `aks-subnet`
-- `aks-appgateway`
-- `aks-virtualkubelet`
+Because preview requirements can change, recheck the current Microsoft documentation immediately
+before implementation.
 
-### Phase 3: Create a dedicated public IP
+### Phase 3: Enable OIDC and Workload Identity
 
-Create a Standard, static public IP for the Application Gateway:
-
-```powershell
-az network public-ip create `
-  --resource-group rg-aks-workshop `
-  --name pip-agw-aks-workshop `
-  --location eastus `
-  --sku Standard `
-  --allocation-method Static
-```
-
-Do not reuse the existing AKS load balancer or Kubernetes Service public IPs.
-
-### Phase 4: Create Application Gateway v2
-
-Resolve the subnet ID and create a `Standard_v2` gateway:
+ALB Controller requires AKS Workload Identity:
 
 ```powershell
-$appGatewaySubnetId = az network vnet subnet show `
-  --resource-group MC_rg-aks-workshop_aks-workshop_eastus `
-  --vnet-name aks-vnet-38181049 `
-  --name snet-appgw-agic `
-  --query id `
-  --output tsv
-
-az network application-gateway create `
-  --resource-group rg-aks-workshop `
-  --name agw-aks-workshop `
-  --location eastus `
-  --sku Standard_v2 `
-  --capacity 1 `
-  --public-ip-address pip-agw-aks-workshop `
-  --subnet $appGatewaySubnetId `
-  --priority 100
-```
-
-Before implementation, review current Application Gateway pricing. Unlike the existing Kubernetes
-LoadBalancer Service, Application Gateway incurs gateway capacity and data-processing charges.
-
-### Phase 5: Enable the AGIC add-on
-
-Resolve the Application Gateway resource ID and associate it with AKS:
-
-```powershell
-$appGatewayId = az network application-gateway show `
-  --resource-group rg-aks-workshop `
-  --name agw-aks-workshop `
-  --query id `
-  --output tsv
-
-az aks enable-addons `
+az aks update `
   --resource-group rg-aks-workshop `
   --name aks-workshop `
-  --addons ingress-appgw `
-  --appgw-id $appGatewayId
+  --enable-oidc-issuer `
+  --enable-workload-identity
 ```
 
-The add-on creates a managed identity for AGIC. After enabling it:
+This changes cluster configuration but does not require recreating the cluster.
 
-1. Verify the `ingress-appgw` add-on reports `enabled: true`.
-2. Verify the AGIC pod is running.
-3. Verify the add-on identity can update `agw-aks-workshop`.
-4. Verify it can read/join the Application Gateway subnet.
-5. If the automatically created role assignments are insufficient, grant the add-on identity the
-   minimum documented access. Do not grant the GitHub identity `Contributor` merely to solve an
-   AGIC identity issue.
+Validate:
 
-AGIC assumes full ownership of its linked Application Gateway by default. Do not manually add
-listeners, backend pools, or routing rules to this workshop gateway because AGIC can overwrite
-configuration that is not represented by Kubernetes Ingress resources.
+```powershell
+az aks show `
+  --resource-group rg-aks-workshop `
+  --name aks-workshop `
+  --query "{oidc:oidcIssuerProfile.enabled,workloadIdentity:securityProfile.workloadIdentity.enabled}" `
+  --output json
+```
 
-### Phase 6: Add a Kubernetes Ingress manifest
+### Phase 4: Enable Gateway API and ALB Controller
 
-Create `k8s/ingress.yaml` with content similar to:
+Enable both managed add-ons together:
+
+```powershell
+az aks update `
+  --resource-group rg-aks-workshop `
+  --name aks-workshop `
+  --enable-gateway-api `
+  --enable-application-load-balancer
+```
+
+Application Gateway for Containers requires the AKS Gateway API add-on to avoid conflicts with
+other Gateway API installations.
+
+Validate:
+
+```powershell
+kubectl get pods --namespace kube-system
+kubectl get gatewayclass azure-alb-external --output yaml
+```
+
+Expected results:
+
+- Two `alb-controller` pods are ready.
+- `GatewayClass/azure-alb-external` exists.
+- Its controller is `alb.networking.azure.io/alb-controller`.
+- The GatewayClass reports an accepted/valid condition.
+
+### Phase 5: Verify the ALB managed identity and roles
+
+Find the add-on identity:
+
+```powershell
+az identity show `
+  --resource-group MC_rg-aks-workshop_aks-workshop_eastus `
+  --name applicationloadbalancer-aks-workshop `
+  --output json
+```
+
+Verify its effective assignments include the required configuration-manager and networking access.
+If the add-on did not grant subnet join permission at the necessary scope, assign `Network
+Contributor` to the identity on the existing subnet only:
+
+```powershell
+$principalId = az identity show `
+  --resource-group MC_rg-aks-workshop_aks-workshop_eastus `
+  --name applicationloadbalancer-aks-workshop `
+  --query principalId `
+  --output tsv
+
+$subnetId = az network vnet subnet show `
+  --resource-group MC_rg-aks-workshop_aks-workshop_eastus `
+  --vnet-name aks-vnet-38181049 `
+  --name aks-appgateway `
+  --query id `
+  --output tsv
+
+az role assignment create `
+  --assignee-object-id $principalId `
+  --assignee-principal-type ServicePrincipal `
+  --role "Network Contributor" `
+  --scope $subnetId
+```
+
+Do not create this assignment unless validation shows it is needed.
+
+### Phase 6: Add ApplicationLoadBalancer
+
+Add `k8s/alb-infrastructure.yaml`:
 
 ```yaml
-# Route public Application Gateway traffic to the website Service.
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+# ALB Controller creates and manages Application Gateway for Containers from this resource.
+apiVersion: alb.networking.azure.io/v1
+kind: ApplicationLoadBalancer
+metadata:
+  name: aks-workshop-alb
+  namespace: default
+spec:
+  associations:
+    # Replace this placeholder with the verified full subnet resource ID.
+    - /subscriptions/<subscription-id>/resourceGroups/MC_rg-aks-workshop_aks-workshop_eastus/providers/Microsoft.Network/virtualNetworks/aks-vnet-38181049/subnets/aks-appgateway
+```
+
+The full subnet ID is not a secret, but hardcoding the subscription ID makes the manifest specific
+to one Azure environment. For this workshop repository, that is acceptable if clearly documented.
+An alternative is to template the value during CD.
+
+Provisioning can take several minutes. Watch status:
+
+```powershell
+kubectl get applicationloadbalancer aks-workshop-alb `
+  --namespace default `
+  --output yaml `
+  --watch
+```
+
+Continue only after the resource reports accepted and ready/programmed conditions.
+
+### Phase 7: Add Gateway
+
+Add `k8s/gateway.yaml`:
+
+```yaml
+# Gateway defines the public HTTP listener managed by Application Gateway for Containers.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
 metadata:
   name: aks-static-website
+  namespace: default
   annotations:
-    # AGIC watches only Ingress resources assigned to this controller.
-    kubernetes.io/ingress.class: azure/application-gateway
-    # Use the existing website root as the Application Gateway health probe.
-    appgw.ingress.kubernetes.io/health-probe-path: /
-    appgw.ingress.kubernetes.io/health-probe-status-codes: "200-399"
+    alb.networking.azure.io/alb-namespace: default
+    alb.networking.azure.io/alb-name: aks-workshop-alb
 spec:
-  rules:
-    - http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: aks-static-website
-                port:
-                  number: 80
+  gatewayClassName: azure-alb-external
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
 ```
 
-The existing NGINX ingress controller should not process this resource because it is explicitly
-assigned to AGIC.
+The annotation names must be rechecked against the installed ALB Controller version before
+implementation because the add-on is evolving.
 
-### Phase 7: Use a staged Service transition
+### Phase 8: Add HTTPRoute
 
-Keep the current `LoadBalancer` Service temporarily while validating Application Gateway. A
-`LoadBalancer` Service also has a cluster-internal service endpoint, so the Ingress can target it
-during the transition.
+Add `k8s/http-route.yaml`:
 
-This provides two paths during testing:
+```yaml
+# Route all HTTP paths from the public Gateway to the website Service.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: aks-static-website
+  namespace: default
+spec:
+  parentRefs:
+    - name: aks-static-website
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: aks-static-website
+          port: 80
+```
+
+The existing NGINX ingress controller does not process Gateway API resources associated with
+`azure-alb-external`, so both controllers can coexist during migration.
+
+### Phase 9: Stage the Service transition
+
+Keep the existing `LoadBalancer` Service while validating the new path:
 
 ```text
-Current path: Internet -> Azure Load Balancer -> Service -> pods
-New path:     Internet -> Application Gateway -> AGIC-managed backend -> pods
+Existing: Internet -> Azure Load Balancer -> Service -> pods
+New:      Internet -> Application Gateway for Containers -> HTTPRoute -> Service -> pods
 ```
 
-After Application Gateway is proven healthy:
+After the new endpoint works:
 
-1. Change `k8s/service.yaml` from `type: LoadBalancer` to `type: ClusterIP`.
+1. Change `k8s/service.yaml` from `LoadBalancer` to `ClusterIP`.
 2. Deploy the change.
-3. Confirm the old Kubernetes Service public IP is released.
-4. Update the README architecture and testing instructions.
+3. Confirm the old Service public IP is released.
+4. Update the main README architecture and testing instructions.
 
-Do not remove the existing LoadBalancer path before the Application Gateway endpoint has been
-tested.
+Do not remove the existing endpoint before the Application Gateway for Containers frontend is
+healthy and tested.
 
-### Phase 8: CI/CD integration
+### Phase 10: CI/CD integration
 
-No workflow logic change should be required. The current CD workflow applies every manifest in
-`k8s/`, so adding `k8s/ingress.yaml` causes the Ingress to be deployed automatically.
+The current CD workflow runs:
 
-Before relying on CD:
+```text
+kubectl apply --filename k8s/
+```
 
-1. Confirm the workflow's cluster-user credential can create and patch Ingress resources.
-2. Validate the new manifest with `kubectl apply --dry-run=client`.
-3. Confirm the successful CI workflow still triggers CD.
-4. Confirm AGIC, rather than NGINX, reconciles the new Ingress.
+Therefore, it will automatically apply the three new manifests once they are committed. However,
+the first provisioning should be staged:
 
-The current cluster-user credential was already verified as able to create Ingress resources.
+1. Enable and validate the managed add-ons separately.
+2. Apply `alb-infrastructure.yaml` and wait for the Azure resource to become ready.
+3. Apply `gateway.yaml` and `http-route.yaml`.
+4. Test the new endpoint.
+5. Only then include the manifests in routine CD.
 
-### Phase 9: DNS and TLS
+This prevents a normal application deployment from hiding infrastructure provisioning failures.
 
-For an initial HTTP demonstration, use the Application Gateway public IP directly.
+The GitHub deployment credential must be checked for permission to create:
 
-For a realistic HTTPS demonstration:
+- `ApplicationLoadBalancer`
+- `Gateway`
+- `HTTPRoute`
+
+If the current cluster-user credential lacks any of these permissions, update Kubernetes
+authorization narrowly rather than granting Azure subscription-level roles.
+
+## DNS, TLS, and WAF
+
+For the first demonstration, use the generated public frontend hostname directly over HTTP.
+
+For a production-style follow-up:
 
 1. Choose a DNS hostname.
-2. Create an `A` record pointing to the Application Gateway static public IP.
-3. Obtain a TLS certificate for that hostname.
-4. Decide whether the certificate is represented by a Kubernetes TLS secret or managed through
-   Application Gateway/Key Vault.
-5. Add the Ingress host and TLS configuration.
-6. Enable HTTP-to-HTTPS redirect with:
+2. Point DNS to the Application Gateway for Containers frontend.
+3. Store or reference an appropriate TLS certificate.
+4. Add an HTTPS listener on port 443.
+5. Attach TLS configuration to the Gateway.
+6. Redirect HTTP to HTTPS.
+7. Add and test an Application Gateway for Containers WAF security policy.
+8. Validate certificate renewal and WAF logs.
 
-   ```yaml
-   appgw.ingress.kubernetes.io/ssl-redirect: "true"
-   ```
-
-7. Validate certificate renewal before calling the setup production-ready.
-
-DNS and TLS are optional for the first workshop iteration but should be included before using the
-endpoint for anything beyond a demonstration.
+TLS and WAF should be separate workshop stages so the initial routing concepts remain clear.
 
 ## Validation checklist
 
-### Azure
+### Azure and add-ons
 
-- [ ] Application Gateway provisioning state is `Succeeded`.
-- [ ] Application Gateway uses `Standard_v2` or `WAF_v2`.
-- [ ] The public IP is Standard SKU and static.
-- [ ] The gateway is attached only to `snet-appgw-agic`.
-- [ ] The AGIC add-on is enabled.
-- [ ] The AGIC managed identity has only the required scopes.
-- [ ] Application Gateway backend health reports the website endpoints as healthy.
+- [ ] Required providers and features report `Registered`.
+- [ ] OIDC issuer and AKS Workload Identity are enabled.
+- [ ] Gateway API and Application Load Balancer add-ons are enabled.
+- [ ] Two ALB Controller pods are ready.
+- [ ] `GatewayClass/azure-alb-external` is valid.
+- [ ] Add-on managed identity and role assignments exist at minimal scopes.
+- [ ] Existing `aks-appgateway` subnet remains delegated correctly.
 
-### Kubernetes
+### Kubernetes and Azure resource lifecycle
 
-- [ ] AGIC pod is `Running` and ready.
-- [ ] An Application Gateway ingress class is present after add-on installation.
-- [ ] `kubectl get ingress aks-static-website` reports an address.
-- [ ] The Ingress backend references Service port 80.
-- [ ] Both website pods remain ready.
-- [ ] The NGINX controller does not claim the AGIC Ingress.
+- [ ] `ApplicationLoadBalancer/aks-workshop-alb` is accepted and ready.
+- [ ] The Application Gateway for Containers resource and association exist in Azure.
+- [ ] `Gateway/aks-static-website` is accepted and programmed.
+- [ ] `HTTPRoute/aks-static-website` is accepted by its parent.
+- [ ] Backend references resolve to the website Service.
+- [ ] Both Nginx pods remain ready.
 
 ### Functional
 
-- [ ] `curl http://<application-gateway-public-ip>/` returns HTTP 200.
-- [ ] Home, About, and Contact pages load through Application Gateway.
-- [ ] Application Gateway access logs show the requests.
-- [ ] A pod rollout completes without losing the ingress endpoint.
-- [ ] The old LoadBalancer endpoint remains available until cutover is approved.
+- [ ] The generated frontend hostname resolves.
+- [ ] Home, About, and Contact pages return HTTP 200.
+- [ ] A pod rollout completes without losing the frontend.
+- [ ] The existing LoadBalancer endpoint remains available until cutover.
+- [ ] After cutover, the Service works as `ClusterIP`.
+
+Useful commands:
+
+```powershell
+kubectl get applicationloadbalancer --all-namespaces
+kubectl get gatewayclass
+kubectl get gateway --all-namespaces
+kubectl get httproute --all-namespaces
+kubectl describe gateway aks-static-website
+kubectl describe httproute aks-static-website
+```
 
 ## Observability
 
-For a complete demonstration, configure Application Gateway diagnostic settings to send access,
-performance, and firewall logs to the existing or an approved Log Analytics workspace.
+Configure Application Gateway for Containers diagnostic settings to an approved Log Analytics
+workspace. Capture access and WAF logs if those categories are available for the chosen setup.
 
-Useful troubleshooting checks include:
+Also monitor:
 
-```powershell
-kubectl get pods --all-namespaces | Select-String ingress
-kubectl get ingress aks-static-website --output wide
-kubectl describe ingress aks-static-website
+- ALB Controller pod logs and restarts
+- Gateway and HTTPRoute status conditions
+- ApplicationLoadBalancer provisioning conditions
+- Backend health
+- AKS pod readiness and rollout status
 
-az network application-gateway show-backend-health `
-  --resource-group rg-aks-workshop `
-  --name agw-aks-workshop
-```
+## Rollback
 
-Common failure causes:
+The staged approach keeps the current public Service available.
 
-- The Ingress class annotation is missing or incorrect.
-- The AGIC managed identity cannot update Application Gateway.
-- The Application Gateway subnet is delegated or contains unsupported resources.
-- Network security group rules block required Application Gateway traffic.
-- The health probe path or expected status codes do not match the application.
-- Application Gateway cannot reach pod IPs because the network layout differs from the plan.
-- AGIC has overwritten manual gateway configuration because it owns the gateway.
-
-## Rollback plan
-
-The staged approach preserves the existing LoadBalancer endpoint until cutover.
-
-If Application Gateway ingress does not work:
+If the new route fails:
 
 1. Keep or restore `service.yaml` as `type: LoadBalancer`.
-2. Delete only the `aks-static-website` Ingress resource.
-3. Confirm the existing LoadBalancer endpoint still serves the site.
-4. Disable the `ingress-appgw` add-on only after removing its Ingress resources.
-5. Remove the dedicated Application Gateway, public IP, and `snet-appgw-agic` subnet only after
-   confirming they are not shared.
-6. Do not delete or alter the existing `aks-appgateway` delegated subnet.
+2. Remove `HTTPRoute/aks-static-website`.
+3. Remove `Gateway/aks-static-website`.
+4. Confirm the original public endpoint still serves the application.
+5. Remove `ApplicationLoadBalancer/aks-workshop-alb` only after confirming it is not shared.
+6. Disable the ALB and Gateway API add-ons only after all dependent resources are removed.
+7. Disable Workload Identity/OIDC only if no other workloads use them and the impact has been
+   reviewed.
+8. Preserve the `aks-appgateway` subnet unless a separate approved cleanup explicitly removes it.
 
-Each deletion should be reviewed and confirmed separately because it is destructive.
+Every deletion and add-on disablement is destructive and must be reviewed separately before
+execution.
 
-## Alternative: Application Gateway for Containers
+## Cost considerations
 
-Application Gateway for Containers is Microsoft's newer Kubernetes-focused Layer 7 ingress
-offering. It supports both Kubernetes Ingress and Gateway API resources and uses ALB Controller
-instead of AGIC.
+Application Gateway for Containers introduces Azure charges beyond the current Kubernetes
+LoadBalancer Service. Review current pricing for:
 
-It is a strong option for this cluster because:
+- Application Gateway for Containers resource usage
+- Capacity/data processing
+- WAF, if enabled
+- Diagnostic log ingestion and retention
+- Public data transfer
 
-- The existing `aks-appgateway` subnet is already delegated to
-  `Microsoft.ServiceNetworking/trafficControllers`.
-- `eastus` supports Application Gateway for Containers.
-- It supports Azure CNI Overlay.
-- Microsoft recommends considering it for new Kubernetes ingress implementations.
-- It offers Gateway API, traffic splitting, retries, header and URL rewrites, gRPC, TLS, and WAF.
-
-It is not identical to classic Application Gateway. If the workshop goal is specifically to teach
-the long-established Application Gateway plus AGIC model, follow the classic plan above. If the
-goal is to teach the current recommended Azure ingress platform, create a separate implementation
-plan for Application Gateway for Containers and reuse the already delegated subnet.
-
-## Decision required before implementation
-
-Choose one path:
-
-| Option | Best when | Subnet |
-|--------|-----------|--------|
-| Classic Application Gateway + AGIC | The workshop specifically teaches Application Gateway and Kubernetes Ingress | Create `snet-appgw-agic` (`10.237.0.0/24`) |
-| Application Gateway for Containers | The workshop should use Microsoft's newer Kubernetes ingress platform | Revalidate and use existing delegated `aks-appgateway` subnet |
-
-Do not implement both for this single website unless the explicit goal is a side-by-side comparison;
-doing so adds cost and makes traffic ownership less clear.
+Delete unused workshop resources after the demonstration only through an approved cleanup plan.
 
 ## References
 
-- [Application Gateway Ingress Controller overview](https://learn.microsoft.com/azure/application-gateway/ingress-controller-overview)
-- [Enable AGIC add-on for an existing AKS cluster](https://learn.microsoft.com/azure/application-gateway/tutorial-ingress-controller-add-on-existing)
-- [Application Gateway infrastructure configuration](https://learn.microsoft.com/azure/application-gateway/configuration-infrastructure)
-- [AGIC annotations](https://learn.microsoft.com/azure/application-gateway/ingress-controller-annotations)
 - [Application Gateway for Containers overview](https://learn.microsoft.com/azure/application-gateway/for-containers/overview)
+- [Deploy ALB Controller with the AKS add-on](https://learn.microsoft.com/azure/application-gateway/for-containers/quickstart-deploy-application-gateway-for-containers-alb-controller-addon)
+- [Create Application Gateway for Containers managed by ALB Controller](https://learn.microsoft.com/azure/application-gateway/for-containers/quickstart-create-application-gateway-for-containers-managed-by-alb-controller)
